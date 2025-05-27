@@ -125,17 +125,24 @@ class Cluster(QWidget):
 
         This method determines which clustering algorithm to run based on the
         selected item in the clusterList, and then calls the appropriate method.
+        The window is hidden before running the algorithm and closed after it completes.
 
         Returns:
             None
         """
         selected_algorithm = self.clusterList.currentItem().text()
+        # Hide the window before running the algorithm
+        self.hide()
+
         if selected_algorithm == "k-means":
             self.runKMeansClustering()
         elif selected_algorithm == "ISODATA":
             self.runISODATAClustering()
         else:
             print(f"Unknown clustering algorithm: {selected_algorithm}")
+
+        # Close the window after the algorithm completes
+        self.close()
 
     def runKMeansClustering(self):
         """
@@ -471,12 +478,76 @@ class Cluster(QWidget):
 
         return new_labels
 
+    def generate_distinct_colors(self, n_colors: int) -> List[QColor]:
+        """
+        Generate a list of perceptually distinct colors.
+
+        This method creates a list of colors that are visually distinct from each other,
+        suitable for visualizing different clusters. It uses a combination of predefined
+        color palettes for small numbers of clusters and algorithmic generation for larger numbers.
+
+        Args:
+            n_colors (int): Number of distinct colors to generate.
+
+        Returns:
+            List[QColor]: List of QColor objects representing distinct colors.
+        """
+        # For small numbers of clusters, use a predefined set of distinct colors
+        # These colors are chosen to be visually distinct and colorblind-friendly
+        predefined_colors = [
+            QColor(230, 25, 75),   # Red
+            QColor(60, 180, 75),   # Green
+            QColor(255, 225, 25),  # Yellow
+            QColor(0, 130, 200),   # Blue
+            QColor(245, 130, 48),  # Orange
+            QColor(145, 30, 180),  # Purple
+            QColor(70, 240, 240),  # Cyan
+            QColor(240, 50, 230),  # Magenta
+            QColor(210, 245, 60),  # Lime
+            QColor(250, 190, 212), # Pink
+            QColor(0, 128, 128),   # Teal
+            QColor(220, 190, 255), # Lavender
+            QColor(170, 110, 40),  # Brown
+            QColor(255, 250, 200), # Beige
+            QColor(128, 0, 0),     # Maroon
+            QColor(170, 255, 195), # Mint
+            QColor(128, 128, 0),   # Olive
+            QColor(255, 215, 180), # Coral
+            QColor(0, 0, 128),     # Navy
+            QColor(128, 128, 128), # Grey
+        ]
+
+        if n_colors <= len(predefined_colors):
+            return predefined_colors[:n_colors]
+
+        # For larger numbers, use HSV color space with golden ratio to distribute hues
+        colors = predefined_colors.copy()
+
+        # Add more colors using the golden ratio method for hue distribution
+        golden_ratio_conjugate = 0.618033988749895  # 1 / phi
+        h = 0.1  # Starting hue
+        s = 0.8  # Saturation
+        v = 0.95  # Value
+
+        while len(colors) < n_colors:
+            h = (h + golden_ratio_conjugate) % 1.0
+            # Vary saturation and value slightly for better distinction
+            s_variation = 0.7 + (len(colors) % 3) * 0.1
+            v_variation = 0.85 + (len(colors) % 2) * 0.1
+
+            # Convert to RGB and create QColor
+            h_degrees = h * 360.0
+            color = QColor.fromHsv(int(h_degrees), int(s_variation * 255), int(v_variation * 255))
+            colors.append(color)
+
+        return colors
+
     def generate_masks(self, labels: NDArray[int], n_clusters: int) -> Dict[int, Tuple[NDArray[bool], QColor]]:
         """
         Generate binary masks and assign a unique color for each cluster.
 
         This method creates a binary mask for each unique cluster label and assigns
-        a visually distinct color to each cluster using a hue-based approach.
+        a visually distinct color to each cluster using a perceptually-based approach.
 
         Args:
             labels (NDArray[int]): Array of cluster labels for each pixel.
@@ -488,13 +559,16 @@ class Cluster(QWidget):
         """
         masks = {}
         unique_labels = np.unique(labels)
+
+        # Generate distinct colors for all unique labels
+        colors = self.generate_distinct_colors(len(unique_labels))
+
         for idx, cluster_id in enumerate(unique_labels):
             # Create binary mask for this cluster (True where label matches cluster_id)
             mask = (labels == cluster_id)
 
-            # Generate a unique color for each cluster using a hue-based approach
-            hue = (idx * 137.5) % 360  # Golden angle approximation for distinct hues
-            color = QColor.fromHsv(int(hue), 200, 200)  # High saturation and value for vibrant colors
+            # Assign a distinct color from our generated palette
+            color = colors[idx]
 
             masks[cluster_id] = (mask, color)
         return masks
@@ -569,6 +643,68 @@ class Cluster(QWidget):
         self.undo_stack.append((np.copy(self.labels), {k: (mask.copy(), color) for k, (mask, color) in self.masks.items()}))
         if len(self.undo_stack) > self.undo_stack_max_size:
             self.undo_stack.pop(0)
+
+        return new_labels, settings
+
+    def merge_clusters(self, cluster_ids: List[int]) -> Tuple[NDArray[int], KMeansSettings]:
+        """
+        Merge multiple clusters into a single cluster.
+
+        This method creates a new mask that combines the masks of all selected clusters,
+        assigns a new label to all pixels in the combined mask, and updates the labels
+        and masks accordingly.
+
+        Args:
+            cluster_ids (List[int]): List of cluster IDs to merge.
+
+        Returns:
+            Tuple[NDArray[int], KMeansSettings]: Tuple containing the new labels array and
+                                               the settings used for clustering. Returns
+                                               (None, None) if merging cannot be performed.
+        """
+        # Check if there are clusters to merge
+        if not cluster_ids or len(cluster_ids) < 2:
+            return None, None
+
+        # Check if all cluster IDs are valid
+        for cluster_id in cluster_ids:
+            if cluster_id not in self.masks:
+                return None, None
+
+        # Create a combined mask for all selected clusters
+        combined_mask = np.zeros_like(self.labels, dtype=bool)
+        for cluster_id in cluster_ids:
+            mask, _ = self.masks[cluster_id]
+            combined_mask = np.logical_or(combined_mask, mask)
+
+        # Create new labels array, preserving original labels outside the combined mask
+        new_labels = np.copy(self.labels)
+
+        # Get the maximum label value to ensure we use a new unique label
+        max_label = np.max(self.labels) if self.labels is not None else -1
+        new_cluster_id = max_label + 1
+
+        # Assign the new label to all pixels in the combined mask
+        new_labels[combined_mask] = new_cluster_id
+
+        # Update labels and masks
+        self.labels = new_labels
+        self.masks = self.generate_masks(self.labels, len(np.unique(new_labels)))
+
+        # Save state to undo stack
+        self.undo_stack.append((np.copy(self.labels), {k: (mask.copy(), color) for k, (mask, color) in self.masks.items()}))
+        if len(self.undo_stack) > self.undo_stack_max_size:
+            self.undo_stack.pop(0)
+
+        # Create settings for the callback
+        settings = KMeansSettings(
+            n_clusters=len(np.unique(self.labels)), 
+            init="random", 
+            n_init=5, 
+            max_iter=100, 
+            tol=1e-3, 
+            random_state=42
+        )
 
         return new_labels, settings
 
@@ -713,14 +849,21 @@ class Cluster(QWidget):
         """
         Create a color table for visualizing cluster labels.
 
+        This method generates a list of perceptually distinct colors for visualizing
+        cluster labels. It uses the same color generation approach as generate_masks
+        to ensure consistency across different visualization methods.
+
         Args:
             num_labels (int): Number of unique labels
 
         Returns:
             List[int]: List of RGB values as integers
         """
-        return [qRgb(int((i/num_labels) * 255), int((i/num_labels) * 255), int((i/num_labels-1) * 255)) 
-                for i in range(num_labels)]
+        # Generate distinct colors using our perceptual color generation method
+        colors = self.generate_distinct_colors(num_labels)
+
+        # Convert QColors to qRgb integers
+        return [qRgb(color.red(), color.green(), color.blue()) for color in colors]
 
     def create_palette_from_color_table(self, color_table: List[int]) -> List[int]:
         """

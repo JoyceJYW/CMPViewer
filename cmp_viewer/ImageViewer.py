@@ -33,7 +33,7 @@ from PyQt5.QtWidgets import QHBoxLayout
 from PyQt5.QtWidgets import QListView
 from PyQt5.QtWidgets import QListWidget
 from PyQt5.QtWidgets import QComboBox
-from PyQt5.QtWidgets import QSlider, QProgressDialog, QListWidgetItem
+from PyQt5.QtWidgets import QSlider, QProgressDialog, QListWidgetItem, QColorDialog, QMenu
 from PyQt5 import QtWidgets
 from PyQt5 import QtGui
 from PyQt5.QtGui import QPixmap, qRgb
@@ -54,6 +54,7 @@ class ImageViewerUi(QMainWindow):
     _color_table = None  # Store color table for saving
     _masks = None  # Store masks and colors for each cluster
     _visible_clusters = set()  # Track which clusters' masks are visible
+    _selected_clusters = set()  # Track which clusters are selected for reclustering
     _mask_opacity = 100  # Default opacity (0-255)
     last_pixmap = None  # Cache for the last rendered base image
     mask_overlays = {}  # Cache for mask overlays
@@ -191,10 +192,6 @@ class ImageViewerUi(QMainWindow):
         self.iterativeClusterLayout = QVBoxLayout()
         self.iterativeClusterBox.setLayout(self.iterativeClusterLayout)
 
-        self.clusterSelectCombo = QComboBox()
-        self.clusterSelectCombo.addItem("Select Cluster")
-        self.iterativeClusterLayout.addWidget(self.clusterSelectCombo)
-
         self.subClustersInput = QLineEdit()
         self.subClustersInput.setPlaceholderText("Number of sub-clusters")
         self.iterativeClusterLayout.addWidget(self.subClustersInput)
@@ -203,9 +200,15 @@ class ImageViewerUi(QMainWindow):
         self.iterativeClusterButton.clicked.connect(self.run_iterative_clustering)
         self.iterativeClusterLayout.addWidget(self.iterativeClusterButton)
 
+        self.mergeClusterButton = QPushButton("Merge Selected Clusters")
+        self.mergeClusterButton.clicked.connect(self.merge_selected_clusters)
+        self.iterativeClusterLayout.addWidget(self.mergeClusterButton)
+
         self.clusterVisibilityList = QListWidget()
         self.clusterVisibilityList.setMinimumHeight(100)
-        self.iterativeClusterLayout.addWidget(QLabel("Cluster Mask Visibility"))
+        self.clusterVisibilityList.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.clusterVisibilityList.customContextMenuRequested.connect(self.show_cluster_context_menu)
+        self.iterativeClusterLayout.addWidget(QLabel("Cluster Mask Visibility (Check to select for reclustering)"))
         self.iterativeClusterLayout.addWidget(self.clusterVisibilityList)
 
         self.opacitySlider = QSlider(Qt.Horizontal)
@@ -449,6 +452,7 @@ class ImageViewerUi(QMainWindow):
         self._color_table = None
         self._masks = None
         self._visible_clusters.clear()
+        self._selected_clusters.clear()
         self._mask_opacity = 100
         self.last_pixmap = None
         self.mask_overlays.clear()
@@ -460,8 +464,6 @@ class ImageViewerUi(QMainWindow):
         self._image_set = models.ImageSet()
         self.displayImage.clear()
 
-        self.clusterSelectCombo.clear()
-        self.clusterSelectCombo.addItem("Select Cluster")
         self.subClustersInput.clear()
         self.clusterVisibilityList.clear()
         self.opacitySlider.setValue(self._mask_opacity)
@@ -514,6 +516,7 @@ class ImageViewerUi(QMainWindow):
         self._color_table = None
         self._masks = None
         self._visible_clusters.clear()
+        self._selected_clusters.clear()
         self._mask_opacity = 100
         self.last_pixmap = None
         self.mask_overlays.clear()
@@ -526,8 +529,6 @@ class ImageViewerUi(QMainWindow):
         self.displayImage.clear()
 
         # Clear cluster-related UI elements
-        self.clusterSelectCombo.clear()
-        self.clusterSelectCombo.addItem("Select Cluster")
         self.subClustersInput.clear()
         self.clusterVisibilityList.clear()
         self.opacitySlider.setValue(self._mask_opacity)
@@ -589,10 +590,6 @@ class ImageViewerUi(QMainWindow):
         pillow_img = self.clusterview.create_label_image(labels, len(np.unique(labels)))
         if isinstance(settings, KMeansSettings) or isinstance(settings, ISODATASettings):
             self._masks = self.clusterview.masks
-            self.clusterSelectCombo.clear()
-            self.clusterSelectCombo.addItem("Select Cluster")
-            for cluster_id in np.unique(labels):
-                self.clusterSelectCombo.addItem(f"Cluster {cluster_id}")
             self.update_cluster_visibility_list(labels)
             self.show_label_image(pillow_img, len(np.unique(labels)))
 
@@ -606,6 +603,20 @@ class ImageViewerUi(QMainWindow):
             item = QListWidgetItem(f"Cluster {cluster_id}")
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Unchecked)
+
+            # Set the background color to match the cluster color
+            if self._masks and cluster_id in self._masks:
+                _, color = self._masks.get(cluster_id)
+                if color:
+                    # Set background color to match cluster color
+                    item.setBackground(color)
+
+                    # Set text color to black or white depending on the brightness of the background
+                    # Using the formula: brightness = 0.299*R + 0.587*G + 0.114*B
+                    brightness = 0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()
+                    text_color = Qt.black if brightness > 128 else Qt.white
+                    item.setForeground(text_color)
+
             self.clusterVisibilityList.addItem(item)
 
         # Remove obsolete clusters
@@ -619,29 +630,130 @@ class ImageViewerUi(QMainWindow):
         self.clusterVisibilityList.itemChanged.connect(self.toggle_cluster_visibility)
         print(f"Updated cluster visibility list with {len(new_clusters)} clusters")
 
+    def show_cluster_context_menu(self, position):
+        """
+        Show a context menu for the cluster visibility list item at the given position.
+
+        This method is called when the user right-clicks on an item in the cluster visibility list.
+        It creates a context menu with an option to change the color of the cluster.
+
+        Args:
+            position (QPoint): The position where the context menu should be displayed.
+        """
+        # Get the item at the position
+        item = self.clusterVisibilityList.itemAt(position)
+        if item is None:
+            return
+
+        # Create a context menu
+        menu = QMenu()
+        change_color_action = menu.addAction("Change Color")
+
+        # Show the menu and get the selected action
+        action = menu.exec_(self.clusterVisibilityList.mapToGlobal(position))
+
+        # Handle the selected action
+        if action == change_color_action:
+            self.change_cluster_color(item)
+
+    def change_cluster_color(self, item):
+        """
+        Change the color of a cluster.
+
+        This method is called when the user selects the "Change Color" option from the context menu.
+        It shows a color dialog and updates the cluster color in the _masks dictionary.
+
+        Args:
+            item (QListWidgetItem): The list item representing the cluster.
+        """
+        if self._masks is None or self.clusterview is None:
+            return
+
+        # Get the cluster ID from the item text
+        cluster_id = int(item.text().split()[-1])
+
+        # Get the current color
+        mask, current_color = self._masks.get(cluster_id, (None, None))
+        if mask is None or current_color is None:
+            return
+
+        # Show a color dialog
+        new_color = QColorDialog.getColor(current_color, self, f"Select Color for Cluster {cluster_id}")
+        if not new_color.isValid():
+            return
+
+        # Update the color in the _masks dictionary
+        self._masks[cluster_id] = (mask, new_color)
+
+        # Update the item background color
+        item.setBackground(new_color)
+
+        # Set text color to black or white depending on the brightness of the background
+        brightness = 0.299 * new_color.red() + 0.587 * new_color.green() + 0.114 * new_color.blue()
+        text_color = Qt.black if brightness > 128 else Qt.white
+        item.setForeground(text_color)
+
+        # Clear the mask overlay cache to force recompute with the new color
+        self.mask_overlays.clear()
+
+        # Update the display
+        self.show_label_image(self._clustered_image, self._num_labels)
+
     def toggle_cluster_visibility(self, item):
         cluster_id = int(item.text().split()[-1])
         print(f"Toggling visibility for cluster {cluster_id}, check state: {item.checkState()}")
         if item.checkState() == Qt.Checked:
             self._visible_clusters.add(cluster_id)
+            self._selected_clusters.add(cluster_id)  # Also select for reclustering
+            print(f"Selected cluster {cluster_id} for reclustering")
         else:
             self._visible_clusters.discard(cluster_id)
+            self._selected_clusters.discard(cluster_id)  # Deselect for reclustering
+            print(f"Deselected cluster {cluster_id} from reclustering")
         self.show_label_image(self._clustered_image, self._num_labels)
+
+    def merge_selected_clusters(self):
+        """
+        Merge selected clusters into a single cluster.
+
+        This method gets the selected clusters from the _selected_clusters set,
+        calls the merge_clusters method in Cluster.py with the selected cluster IDs,
+        and calls the on_cluster_callback method with the new labels and settings.
+        """
+        if self.clusterview is None or self._masks is None:
+            QMessageBox.warning(self, "No Clustering Data", "Please run initial clustering first.")
+            return
+
+        if len(self._selected_clusters) < 2:
+            QMessageBox.warning(self, "Insufficient Clusters Selected", "Please select at least two clusters to merge by checking them in the Cluster Mask Visibility list.")
+            return
+
+        # Convert set to list for the merge_clusters method
+        cluster_ids = list(self._selected_clusters)
+
+        # Call the merge_clusters method in Cluster.py
+        new_labels, new_settings = self.clusterview.merge_clusters(cluster_ids)
+
+        if new_labels is None:
+            QMessageBox.warning(self, "Merge Failed", "Failed to merge the selected clusters. Please ensure all selected clusters are valid.")
+            return
+
+        # Call the callback with the new labels and settings
+        self.on_cluster_callback(new_labels, new_settings)
+
+        # Clear selected clusters after processing
+        self._selected_clusters.clear()
+
+        # Show success message
+        QMessageBox.information(self, "Merge Successful", f"Successfully merged {len(cluster_ids)} clusters into a single cluster.")
 
     def run_iterative_clustering(self):
         if self.clusterview is None or self._masks is None:
             QMessageBox.warning(self, "No Clustering Data", "Please run initial clustering first.")
             return
 
-        selected_cluster = self.clusterSelectCombo.currentText()
-        if selected_cluster == "Select Cluster":
-            QMessageBox.warning(self, "Invalid Selection", "Please select a cluster to refine.")
-            return
-
-        cluster_id = int(selected_cluster.split()[-1])
-        mask, _ = self._masks.get(cluster_id, (None, None))
-        if mask is None:
-            QMessageBox.warning(self, "Invalid Mask", "Selected cluster mask is not available.")
+        if not self._selected_clusters:
+            QMessageBox.warning(self, "No Clusters Selected", "Please select at least one cluster for reclustering by checking it in the Cluster Mask Visibility list.")
             return
 
         try:
@@ -652,12 +764,22 @@ class ImageViewerUi(QMainWindow):
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid number of sub-clusters (at least 2).")
             return
 
-        new_labels, new_settings = self.clusterview.cluster_on_mask(mask, n_sub_clusters)
-        if new_labels is None:
-            QMessageBox.warning(self, "No Pixels", "No pixels in the selected mask region for clustering.")
-            return
+        # Process each selected cluster
+        for cluster_id in self._selected_clusters:
+            mask, _ = self._masks.get(cluster_id, (None, None))
+            if mask is None:
+                print(f"Invalid mask for cluster {cluster_id}, skipping")
+                continue
 
-        self.on_cluster_callback(new_labels, new_settings)
+            new_labels, new_settings = self.clusterview.cluster_on_mask(mask, n_sub_clusters)
+            if new_labels is None:
+                print(f"No pixels in the mask region for cluster {cluster_id}, skipping")
+                continue
+
+            self.on_cluster_callback(new_labels, new_settings)
+
+        # Clear selected clusters after processing
+        self._selected_clusters.clear()
 
     def undo_clustering(self):
         if self.clusterview and self.clusterview.undo_clustering():
