@@ -1,6 +1,12 @@
 # CMP Viewer (v1.5.2)
 
-A cross-platform tool for visualizing and analyzing multidimensional images with clustering capabilities, written in Python by Becca Pfeiffer and Nat Quayle Nelson.
+A cross-platform tool for visualizing and analyzing multidimensional images with clustering capabilities, written in Python.
+
+CMPViewer Team:
+Rebecca Pfeiffer (Lead contact)
+Eric Kunz
+James Anderson
+Nat Quayle Nelson
 
 ## Description
 
