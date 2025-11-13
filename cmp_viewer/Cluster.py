@@ -16,12 +16,16 @@ import cmp_viewer.models
 import cmp_viewer.utils
 import logging
 
+# Create Logs directory if it doesn't exist
+log_dir = 'cmp_viewer/Logs'
+os.makedirs(log_dir, exist_ok=True)
+
 # Configure logging to write to BOTH file and console
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('cmp_viewer/Logs/cluster_debug.log'),  # Log to file
+        logging.FileHandler(os.path.join(log_dir, 'cluster_debug.log')),  # Log to file
         logging.StreamHandler()  # Also print to console
     ]
 )
