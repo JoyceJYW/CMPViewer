@@ -5,6 +5,7 @@ A cross-platform tool for visualizing and analyzing multidimensional images with
 CMPViewer Team:
 Rebecca Pfeiffer (Lead contact)
 Eric Kunz
+Joyce Wang
 James Anderson
 Nat Quayle Nelson
 
