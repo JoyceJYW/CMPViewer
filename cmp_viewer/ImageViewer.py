@@ -269,7 +269,8 @@ class ImageViewerUi(QMainWindow):
 
         img_array = self.rawImages[index]
         gray1D = img_array.tobytes()
-        qImg = QImage(gray1D, img_array.shape[1], img_array.shape[0], QImage.Format_Indexed8)
+        bytesPerLine = img_array.shape[1]  # Width in bytes for grayscale
+        qImg = QImage(gray1D, img_array.shape[1], img_array.shape[0], bytesPerLine, QImage.Format_Indexed8)
         pixmap = QPixmap.fromImage(qImg).scaled(2000, 5000, Qt.KeepAspectRatio)
         self.displayImage.clear()
         self.overlay_items.clear()  # Clear overlay items since scene is cleared
