@@ -17,7 +17,7 @@ import cmp_viewer.utils
 import logging
 
 # Create Logs directory if it doesn't exist
-log_dir = 'cmp_viewer/Logs'
+log_dir = os.path.join(os.path.dirname(__file__), 'Logs')
 os.makedirs(log_dir, exist_ok=True)
 
 # Configure logging to write to BOTH file and console
