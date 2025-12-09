@@ -100,7 +100,7 @@ class ImageViewerUi(QMainWindow):
         self.leftControlsScrollArea.setWidget(self.leftControlsWidget)
         self.leftControlsScrollArea.setWidgetResizable(True)
         self.leftControlsScrollArea.setFixedWidth(400)  # Fixed width to prevent overlap
-        self.leftControlsScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.leftControlsScrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.leftControlsScrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         # Add the left controls scroll area to the main layout
