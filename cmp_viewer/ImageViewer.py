@@ -1447,7 +1447,7 @@ class ImageViewerUi(QMainWindow):
             smask = any_entry[0]
             height, width = smask.shape
             if self.clusterview is not None:
-                scale_factor = self.clusterview.calculate_optimal_scale_factor(height, width)
+                scale_factor = utils.calculate_optimal_scale_factor(height, width)
             else:
                 max_pixels = 500000
                 scale_factor = np.sqrt(max_pixels / (height * width)) if height * width > max_pixels else 1.0
@@ -1471,7 +1471,7 @@ class ImageViewerUi(QMainWindow):
                     continue
                 # Create overlay
                 if self.clusterview is not None:
-                    overlay = self.clusterview.create_mask_overlay(
+                    overlay = mask_module.create_mask_overlay(
                         mask, color, self._mask_opacity,
                         target_width=new_width, target_height=new_height
                     )
